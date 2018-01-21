@@ -1,0 +1,6 @@
+.DS_Store
+.terraform
+*tfstate*
+vendor/*
+!vendor/vendor.json
+bin
