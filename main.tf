@@ -1,5 +1,5 @@
 provider "aws" {
-    region = "us-east-1"
+  region = "${var.region}"
 }
 
 data "archive_file" "lambda" {
@@ -17,7 +17,10 @@ resource "aws_iam_role" "lambda_exec_role" {
     {
       "Action": "sts:AssumeRole",
       "Principal": {
-        "Service": "lambda.amazonaws.com"
+        "Service": [
+          "lambda.amazonaws.com",
+          "apigateway.amazonaws.com"
+        ]
       },
       "Effect": "Allow",
       "Sid": ""
@@ -34,6 +37,7 @@ resource "aws_lambda_function" "hello_function" {
     filename         = "${data.archive_file.lambda.output_path}"
     source_code_hash = "${base64sha256(file("${data.archive_file.lambda.output_path}"))}"
     role             = "${aws_iam_role.lambda_exec_role.arn}"
+    publish          = true
 }
 
 resource "aws_api_gateway_rest_api" "example_api" {
@@ -43,14 +47,14 @@ resource "aws_api_gateway_rest_api" "example_api" {
 
 resource "aws_api_gateway_resource" "example_api_resource" {
   rest_api_id = "${aws_api_gateway_rest_api.example_api.id}"
-  parent_id = "${aws_api_gateway_rest_api.example_api.root_resource_id}"
-  path_part = "messages"
+  parent_id   = "${aws_api_gateway_rest_api.example_api.root_resource_id}"
+  path_part   = "messages"
 }
 
 resource "aws_api_gateway_method" "example_api_method" {
-  rest_api_id = "${aws_api_gateway_rest_api.example_api.id}"
-  resource_id = "${aws_api_gateway_resource.example_api_resource.id}"
-  http_method = "POST"
+  rest_api_id   = "${aws_api_gateway_rest_api.example_api.id}"
+  resource_id   = "${aws_api_gateway_resource.example_api_resource.id}"
+  http_method   = "POST"
   authorization = "NONE"
 }
 
@@ -58,9 +62,17 @@ resource "aws_api_gateway_integration" "example_api_method-integration" {
   rest_api_id = "${aws_api_gateway_rest_api.example_api.id}"
   resource_id = "${aws_api_gateway_resource.example_api_resource.id}"
   http_method = "${aws_api_gateway_method.example_api_method.http_method}"
-  type = "AWS_PROXY"
-  uri = "arn:aws:apigateway:${var.region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${var.region}:${var.account_id}:function:${aws_lambda_function.hello_function.function_name}/invocations"
+  type        = "AWS_PROXY"
+  uri         = "arn:aws:apigateway:${var.region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${var.region}:${var.account_id}:function:${aws_lambda_function.hello_function.function_name}/invocations"
   integration_http_method = "POST"
+}
+
+resource "aws_lambda_permission" "allow_api_gateway" {
+  function_name = "${aws_lambda_function.hello_function.function_name}"
+  statement_id  = "AllowExecutionFromApiGateway"
+  action        = "lambda:InvokeFunction"
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "arn:aws:execute-api:${var.region}:${var.account_id}:${aws_api_gateway_rest_api.example_api.id}/*/${aws_api_gateway_method.example_api_method.http_method}${aws_api_gateway_resource.example_api_resource.path_part}"
 }
 
 resource "aws_api_gateway_deployment" "example_deployment_dev" {
